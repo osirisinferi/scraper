@@ -1,6 +1,7 @@
-import binascii, urllib, socket, random, struct
-from bcode import bdecode
-from urlparse import urlparse, urlunsplit
+import binascii, socket, random, struct
+from fastbencode import bdecode
+from urllib.parse import urlencode, urlparse, urlunsplit
+from urllib.request import urlopen
 
 def scrape(tracker, hashes):
     """
@@ -26,14 +27,14 @@ def scrape(tracker, hashes):
 
     if parsed.scheme in ["http", "https"]:
         if "announce" not in tracker:
-            raise RuntimeError("%s doesnt support scrape" % tracker)
+            raise RuntimeError(f"{tracker} doesnt support scrape")
         parsed = urlparse(tracker.replace("announce", "scrape"))
         return scrape_http(parsed, hashes)
 
-    raise RuntimeError("Unknown tracker scheme: %s" % parsed.scheme)
+    raise RuntimeError(f"Unknown tracker scheme: {parsed.scheme}")
 
 def scrape_udp(parsed_tracker, hashes):
-    print "Scraping UDP: %s for %s hashes" % (parsed_tracker.geturl(), len(hashes))
+    print(f"Scraping UDP: {parsed_tracker.geturl()} for {len(hashes)} hashes")
     if len(hashes) > 74:
         raise RuntimeError("Only 74 hashes can be scraped on a UDP tracker due to UDP limitations")
     transaction_id = "\x00\x00\x04\x12\x27\x10\x19\x70";
@@ -55,24 +56,24 @@ def scrape_udp(parsed_tracker, hashes):
     return udp_parse_scrape_response(buf, transaction_id, hashes)
 
 def scrape_http(parsed_tracker, hashes):
-    print "Scraping HTTP: %s for %s hashes" % (parsed_tracker.geturl(), len(hashes))
+    print(f"Scraping HTTP: {parsed_tracker.geturl()} for {len(hashes)} hashes")
     qs = []
     for hash in hashes:
         url_param = binascii.a2b_hex(hash)
         qs.append(("info_hash", url_param))
-    qs = urllib.urlencode(qs)
+    qs = urlencode(qs)
     pt = parsed_tracker
     url = urlunsplit((pt.scheme, pt.netloc, pt.path, qs, pt.fragment))
-    handle = urllib.urlopen(url);
-    if handle.getcode() is not 200:
-        raise RuntimeError("%s status code returned" % handle.getcode())
+    handle = urlopen(url);
+    if handle.getcode() != 200:
+        raise RuntimeError(f"{handle.getcode()} status code returned")
     decoded = bdecode(handle.read())
     ret = {}
-    for hash, stats in decoded['files'].iteritems():
+    for hash, stats in decoded[b'files'].items():
         nice_hash = binascii.b2a_hex(hash)
-        s = stats["complete"]
-        p = stats["incomplete"]
-        c = stats["downloaded"]
+        s = stats[b"complete"]
+        p = stats[b"incomplete"]
+        c = stats[b"downloaded"]
         ret[nice_hash] = { "seeds" : s, "peers" : p, "complete" : c}
     return ret
 
@@ -87,20 +88,20 @@ def udp_create_connection_request():
 
 def udp_parse_connection_response(buf, sent_transaction_id):
     if len(buf) < 16:
-        raise RuntimeError("Wrong response length getting connection id: %s" % len(buf))
+        raise RuntimeError(f"Wrong response length getting connection id: {len(buf)}")
     action = struct.unpack_from("!i", buf)[0] #first 4 bytes is action
 
     res_transaction_id = struct.unpack_from("!i", buf, 4)[0] #next 4 bytes is transaction id
     if res_transaction_id != sent_transaction_id:
-        raise RuntimeError("Transaction ID doesnt match in connection response! Expected %s, got %s"
-            % (sent_transaction_id, res_transaction_id))
+        raise RuntimeError("Transaction ID doesnt match in connection response! Expected "
+                          f"{sent_transaction_id}, got {res_transaction_id}")
 
     if action == 0x0:
         connection_id = struct.unpack_from("!q", buf, 8)[0] #unpack 8 bytes from byte 8, should be the connection_id
         return connection_id
     elif action == 0x3:
         error = struct.unpack_from("!s", buf, 8)
-        raise RuntimeError("Error while trying to get a connection response: %s" % error)
+        raise RuntimeError(f"Error while trying to get a connection response: {error}")
     pass
 
 def udp_create_scrape_request(connection_id, hashes):
@@ -117,12 +118,12 @@ def udp_create_scrape_request(connection_id, hashes):
 
 def udp_parse_scrape_response(buf, sent_transaction_id, hashes):
     if len(buf) < 16:
-        raise RuntimeError("Wrong response length while scraping: %s" % len(buf))
+        raise RuntimeError(f"Wrong response length while scraping: {len(buf)}")
     action = struct.unpack_from("!i", buf)[0] #first 4 bytes is action
     res_transaction_id = struct.unpack_from("!i", buf, 4)[0] #next 4 bytes is transaction id
     if res_transaction_id != sent_transaction_id:
-        raise RuntimeError("Transaction ID doesnt match in scrape response! Expected %s, got %s"
-            % (sent_transaction_id, res_transaction_id))
+        raise RuntimeError("Transaction ID doesnt match in scrape response! Expected "
+                          f"{sent_transaction_id}, got {res_transaction_id}")
     if action == 0x2:
         ret = {}
         offset = 8; #next 4 bytes after action is transaction_id, so data doesnt start till byte 8
@@ -138,7 +139,7 @@ def udp_parse_scrape_response(buf, sent_transaction_id, hashes):
     elif action == 0x3:
         #an error occured, try and extract the error string
         error = struct.unpack_from("!s", buf, 8)
-        raise RuntimeError("Error while scraping: %s" % error)
+        raise RuntimeError(f"Error while scraping: {error}")
 
 def udp_get_transaction_id():
     return int(random.randrange(0, 255))
